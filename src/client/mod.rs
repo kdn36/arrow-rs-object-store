@@ -880,9 +880,11 @@ impl ClientOptions {
         // size of objects.
         builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
 
-        if self.randomize_addresses.get()? {
-            builder = builder.dns_resolver(Arc::new(dns::ShuffleResolver));
-        }
+        //kdn HACK
+        // if self.randomize_addresses.get()? {
+        //     builder = builder.dns_resolver(Arc::new(dns::ShuffleResolver));
+        // }
+        builder = builder.hickory_dns(true);
 
         builder
             .https_only(!self.allow_http.get()?)
