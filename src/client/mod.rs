@@ -790,6 +790,108 @@ impl ClientOptions {
             .with_connect_timeout(Duration::from_secs(1))
     }
 
+    /// Returns a [`ClientBuilder]` pre-configured with the provided [`ClientOptions`]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn client_builder(&self) -> Result<reqwest::ClientBuilder> {
+        // Re-uses the current `client()`` configuration logic.
+        // @TODO: refactor `client()` to re-use this foundational builder.
+        let mut builder = reqwest::ClientBuilder::new();
+
+        match &self.user_agent {
+            Some(user_agent) => builder = builder.user_agent(user_agent.get()?),
+            None => builder = builder.user_agent(DEFAULT_USER_AGENT),
+        }
+
+        if let Some(headers) = &self.default_headers {
+            builder = builder.default_headers(headers.clone())
+        }
+
+        if let Some(proxy) = &self.proxy_url {
+            let mut proxy = Proxy::all(proxy).map_err(map_client_error)?;
+
+            if let Some(certificate) = &self.proxy_ca_certificate {
+                let certificate = reqwest::tls::Certificate::from_pem(certificate.as_bytes())
+                    .map_err(map_client_error)?;
+
+                builder = builder.add_root_certificate(certificate);
+            }
+
+            if let Some(proxy_excludes) = &self.proxy_excludes {
+                let no_proxy = NoProxy::from_string(proxy_excludes);
+
+                proxy = proxy.no_proxy(no_proxy);
+            }
+
+            builder = builder.proxy(proxy);
+        }
+
+        for certificate in &self.root_certificates {
+            builder = builder.add_root_certificate(certificate.0.clone());
+        }
+
+        if let Some(timeout) = &self.timeout {
+            builder = builder.timeout(timeout.get()?)
+        }
+
+        if let Some(timeout) = &self.connect_timeout {
+            builder = builder.connect_timeout(timeout.get()?)
+        }
+
+        if let Some(timeout) = &self.read_timeout {
+            builder = builder.read_timeout(timeout.get()?)
+        }
+
+        if let Some(timeout) = &self.pool_idle_timeout {
+            builder = builder.pool_idle_timeout(timeout.get()?)
+        }
+
+        if let Some(max) = &self.pool_max_idle_per_host {
+            builder = builder.pool_max_idle_per_host(max.get()?)
+        }
+
+        if let Some(interval) = &self.http2_keep_alive_interval {
+            builder = builder.http2_keep_alive_interval(interval.get()?)
+        }
+
+        if let Some(interval) = &self.http2_keep_alive_timeout {
+            builder = builder.http2_keep_alive_timeout(interval.get()?)
+        }
+
+        if self.http2_keep_alive_while_idle.get()? {
+            builder = builder.http2_keep_alive_while_idle(true)
+        }
+
+        if let Some(sz) = &self.http2_max_frame_size {
+            builder = builder.http2_max_frame_size(Some(sz.get()?))
+        }
+
+        if self.http1_only.get()? {
+            builder = builder.http1_only()
+        }
+
+        if self.http2_only.get()? {
+            builder = builder.http2_prior_knowledge()
+        }
+
+        if self.allow_insecure.get()? {
+            builder = builder.danger_accept_invalid_certs(true)
+        }
+
+        // Explicitly disable compression, since it may be automatically enabled
+        // when certain reqwest features are enabled. Compression interferes
+        // with the `Content-Length` header, which is used to determine the
+        // size of objects.
+        builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
+
+        if self.randomize_addresses.get()? {
+            builder = builder.dns_resolver(Arc::new(dns::ShuffleResolver));
+        }
+
+        builder = builder.https_only(!self.allow_http.get()?);
+
+        Ok(builder)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn client(&self) -> Result<reqwest::Client> {
         let mut builder = reqwest::ClientBuilder::new();
